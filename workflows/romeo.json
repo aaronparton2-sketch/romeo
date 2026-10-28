@@ -1,0 +1,2193 @@
+{
+ "name": "🌹 ROMEO - date night (the full build)",
+ "nodes": [
+  {
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "days",
+       "triggerAtHour": 7
+      }
+     ]
+    }
+   },
+   "name": "Every morning, 7am",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    40,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// ============ ROMEO SETTINGS ============  edit these, nothing else. Setup: README.md\nreturn [{ json: {\n  FILMING: false,\n  ZERO_SPEND: false,\n  FORCE_GO: false,\n  ME: 'You',\n  HER: 'babe',                              // what Romeo calls her in the invite\n  TELEGRAM_CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID',          // you\n  HER_CHAT_ID: 'HER_TELEGRAM_CHAT_ID',                // she messages your bot once, then this is her chat id\n  BABYSITTER_CHAT_ID: 'BABYSITTER_TELEGRAM_CHAT_ID',  // same for your babysitter\n  MY_EMAIL: 'you@example.com',\n  HER_EMAIL: 'her@example.com',                       // she gets the calendar invite\n  MY_CALENDAR: 'primary',\n  HER_CALENDAR: 'her@example.com',                    // her Google calendar, shared with you (free/busy is enough)\n  TIMEZONE: 'Australia/Perth',\n  HOME: { lat: -31.9523, lng: 115.8613 },\n  HER_WORK: { lat: -31.9554, lng: 115.8585, address: 'Her work address' },\n  CITY: 'Perth WA',                                   // added to every restaurant search\n  RULES: { maxCloud: 25, maxWindKmh: 20, maxRain: 20, sunsetAfter: '19:00', freeAfter: '18:00' },\n  PARTY: 2,\n  BABYSITTER: { name: 'Sophie', ratePerHour: 25, wiseRecipientId: 0 },  // Wise recipient id for her bank account\n  FLOWERS: { budget: 90, card: 'Dress nice tonight. x' },\n  FALLBACK_FLORIST: { name: 'Your usual florist', email: 'orders@your-florist.com.au' },\n  HER_SONG: { title: 'Her favourite song', artist: '', uri: 'spotify:track:YOUR_TRACK_ID' },\n  HOME_ASSISTANT_URL: 'https://YOUR-HOME.ui.nabu.casa',\n  HEATER: 'climate.living_room',\n  WISE_PROFILE_ID: 0,\n  AGENT_MAX_USD: 2,                                   // hard spend cap per browser-agent run\n  MODEL: 'claude-sonnet-5-5',\n} }];\n"
+   },
+   "name": "Romeo settings",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://api.open-meteo.com/v1/forecast?latitude={{ $('Romeo settings').first().json.HOME.lat }}&longitude={{ $('Romeo settings').first().json.HOME.lng }}&hourly=cloud_cover,wind_speed_10m,precipitation_probability&daily=sunset&timezone={{ encodeURIComponent($('Romeo settings').first().json.TIMEZONE) }}&forecast_days=1",
+    "options": {
+     "timeout": 30000
+    }
+   },
+   "name": "Weather forecast + sunset",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    416,
+    368
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "// Open-Meteo: free, no key. The sunset time plus cloud, wind and rain in the sunset hour.\nconst S = $('Romeo settings').first().json;\nconst f = $input.first().json;\nconst sunsetAt = f.daily.sunset[0];                      // local time, e.g. 2026-11-06T19:05\nconst i = Math.max(0, f.hourly.time.indexOf(sunsetAt.slice(0, 13) + ':00'));\nconst cloud = f.hourly.cloud_cover[i];\nconst wind = Math.round(f.hourly.wind_speed_10m[i]);\nconst rain = f.hourly.precipitation_probability[i];\nconst sunset = sunsetAt.slice(11, 16);\nconst checks = {\n  'clear skies': cloud <= S.RULES.maxCloud,\n  'no wind': wind <= S.RULES.maxWindKmh,\n  'no rain': rain <= S.RULES.maxRain,\n  'sunset after seven': sunset >= S.RULES.sunsetAfter,\n};\nconst perfect = Object.values(checks).every(Boolean);\nconst day = new Date(sunsetAt + ':00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });\nreturn [{ json: { date: sunsetAt.slice(0, 10), day, sunset, cloud, wind, rain, checks, perfect,\n  forced: !perfect && !!S.FORCE_GO } }];\n"
+   },
+   "name": "Read the sky",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    592,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "calendar",
+    "calendar": {
+     "__rl": true,
+     "mode": "id",
+     "value": "={{ $('Romeo settings').first().json.MY_CALENDAR }}"
+    },
+    "timeMin": "={{ $('Read the sky').first().json.date + 'T' + $('Romeo settings').first().json.RULES.freeAfter + ':00' }}",
+    "timeMax": "={{ $('Read the sky').first().json.date + 'T23:30:00' }}",
+    "options": {
+     "outputFormat": "availability",
+     "timezone": "={{ $('Romeo settings').first().json.TIMEZONE }}"
+    }
+   },
+   "name": "My calendar: free after six?",
+   "type": "n8n-nodes-base.googleCalendar",
+   "typeVersion": 1.3,
+   "position": [
+    768,
+    368
+   ],
+   "executeOnce": true
+  },
+  {
+   "parameters": {
+    "resource": "calendar",
+    "calendar": {
+     "__rl": true,
+     "mode": "id",
+     "value": "={{ $('Romeo settings').first().json.HER_CALENDAR }}"
+    },
+    "timeMin": "={{ $('Read the sky').first().json.date + 'T' + $('Romeo settings').first().json.RULES.freeAfter + ':00' }}",
+    "timeMax": "={{ $('Read the sky').first().json.date + 'T23:30:00' }}",
+    "options": {
+     "outputFormat": "availability",
+     "timezone": "={{ $('Romeo settings').first().json.TIMEZONE }}"
+    }
+   },
+   "name": "Her calendar: free after six?",
+   "type": "n8n-nodes-base.googleCalendar",
+   "typeVersion": 1.3,
+   "position": [
+    944,
+    368
+   ],
+   "executeOnce": true
+  },
+  {
+   "parameters": {
+    "jsCode": "const me = $('My calendar: free after six?').first().json;\nconst her = $('Her calendar: free after six?').first().json;\nreturn [{ json: { me: { available: !!me.available }, her: { available: !!her.available } } }];\n"
+   },
+   "name": "Both calendars",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const S = $('Romeo settings').first().json;\nconst sky = $('Read the sky').first().json;\nconst cal = $input.first().json;\nconst bothFree = !!(cal.me && cal.me.available && cal.her && cal.her.available);\nconst go = (sky.perfect || sky.forced) && bothFree;\nconst tick = (ok) => (ok ? '✅' : '❌');\nconst lines = Object.entries(sky.checks).map(([k, v]) => `${tick(v)} ${k}`);\nlines.push(`${tick(bothFree)} both free after six`);\nreturn [{ json: { go, bothFree, report: `🌅 <b>Sunset ${sky.sunset}</b>, ${sky.cloud}% cloud, ${sky.wind} km/h wind\\n` + lines.join('\\n') +\n  (sky.forced ? '\\n<i>(filming: sky forced perfect)</i>' : '') } }];\n"
+   },
+   "name": "Perfect night?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1296,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.go }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Pull the trigger?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1472,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 1 · The trigger 🌅\n7am daily: Open-Meteo for cloud, wind, rain and the sunset time; Google Calendar free/busy for both of you after six.",
+    "width": 1412,
+    "height": 470,
+    "color": 5
+   },
+   "name": "note-9",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    200,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "row",
+    "operation": "get",
+    "returnAll": true,
+    "dataTableId": {
+     "__rl": true,
+     "mode": "name",
+     "value": "romeo_saves"
+    }
+   },
+   "name": "Her saved spots",
+   "type": "n8n-nodes-base.dataTable",
+   "typeVersion": 1.1,
+   "position": [
+    1648,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "https://places.googleapis.com/v1/places:searchText",
+    "options": {
+     "timeout": 30000,
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 200
+      }
+     }
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "X-Goog-FieldMask",
+       "value": "places.displayName,places.location,places.editorialSummary,places.reviews,places.websiteUri,places.nationalPhoneNumber"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ textQuery: $json.name + ' ' + ($json.suburb || '') + ' ' + $('Romeo settings').first().json.CITY, pageSize: 1 }) }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Google Places: each spot",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1824,
+    368
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "// Google Places gives each saved spot a location and a short description for Romeo.\nconst rows = $('Her saved spots').all().map(i => i.json);\nreturn $input.all().map((i, n) => {\n  const p = (i.json.places || [])[0] || {};\n  const r = rows[n] || {};\n  return { json: { name: (p.displayName || {}).text || r.name, suburb: r.suburb, cuisine: r.cuisine, ig: r.ig,\n    lat: (p.location || {}).latitude, lng: (p.location || {}).longitude, phone: p.nationalPhoneNumber || '',\n    website: p.websiteUri || '', about: [((p.editorialSummary || {}).text || ''), ...((p.reviews || []).slice(0, 3).map(x => ((x.text || {}).text || '').slice(0, 200)))].join(' ') } };\n}).filter(i => i.json.lat);\n"
+   },
+   "name": "Spots with details",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2000,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Hand Romeo every saved spot and tonight's sunset, and ask for ONE pick back as JSON.\nconst S = $('Romeo settings').first().json;\nconst sky = $('Read the sky').first().json;\nconst saves = $input.all().map((i, n) => ({ n, ...i.json }));\nconst prompt = `You plan date night. Tonight's sunset is at ${sky.sunset} in ${S.TIMEZONE}.\nBelow are restaurants she has saved. Pick the ONE most likely to have a table for two by a window looking straight at the sunset (west-facing, on the water beats everything).\nNever pick a place with no view.\nReply with JSON only: {\"n\": <number>, \"why\": \"<one short sentence>\", \"dressCode\": \"<2-5 words>\", \"vibe\": \"<3-6 words>\"}\n\n${saves.map(s => `${s.n}. ${s.name} (${s.suburb}) - ${s.cuisine}. ${s.about || ''}`).join('\\n')}`;\nreturn [{ json: { saves, body: { model: S.MODEL, max_tokens: 300, messages: [{ role: 'user', content: prompt }] } } }];\n"
+   },
+   "name": "Brief for Romeo",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2176,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages",
+    "options": {
+     "timeout": 90000
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "anthropic-version",
+       "value": "2023-06-01"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.body) }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "anthropicApi"
+   },
+   "name": "Claude picks the spot",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2352,
+    368
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "// Claude's pick, checked. If Claude is off (ZERO_SPEND) or answers badly, take the first\n// spot that mentions water, so the run never stalls.\nconst S = $('Romeo settings').first().json;\nconst sky = $('Read the sky').first().json;\nconst saves = $('Brief for Romeo').first().json.saves;\nlet pick = {};\ntry {\n  const txt = ($input.first().json.content || [])[0].text;\n  pick = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));\n} catch (e) { pick = {}; }\nlet r = saves[pick.n];\nif (!r) {\n  r = saves.find(s => /water|ocean|beach|west/i.test(s.about || '')) || saves[0];\n  pick = { why: 'Right on the water, facing west.', dressCode: 'Smart casual', vibe: 'Sunset by the water' };\n}\n// book 30 minutes before sunset, on a quarter hour\nconst [h, m] = sky.sunset.split(':').map(Number);\nlet mins = h * 60 + m - 30; mins -= mins % 15;\nconst time = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;\nconst nice = new Date(`${sky.date}T${time}:00`).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });\nreturn [{ json: { ...r, why: pick.why, dressCode: pick.dressCode || 'Smart casual', vibe: pick.vibe || '',\n  date: sky.date, day: sky.day, time, niceTime: nice, sunset: sky.sunset, party: S.PARTY } }];\n"
+   },
+   "name": "The pick",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2528,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// The browser agent CHECKS the booking page. It does not book: that only happens after she taps yes.\nconst S = $('Romeo settings').first().json;\nconst r = $input.first().json;\nconst task = `Go to ${r.website || ('the official website of ' + r.name + ', ' + r.suburb)} and open its online booking page.\nCheck whether there is a table for ${r.party} on ${r.date} at ${r.time} (or within 30 minutes either side). Do NOT make a booking.\nReport available=true/false, the exact time offered, and whether a window or view table can be requested.`;\nconst schema = { type: 'object', properties: { available: { type: 'boolean' }, time: { type: 'string' }, table: { type: 'string' }, reason: { type: 'string' } } };\nreturn [{ json: { ...r, run: { task, outputSchema: schema, maxCostUsd: S.AGENT_MAX_USD } } }];\n"
+   },
+   "name": "Agent: brief (check)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2704,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "https://api.browser-use.com/api/v4/runs",
+    "options": {
+     "timeout": 30000
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.run) }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Agent: start (check)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2880,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "resume": "timeInterval",
+    "amount": 30,
+    "unit": "seconds"
+   },
+   "name": "Wait 30s (check)",
+   "type": "n8n-nodes-base.wait",
+   "typeVersion": 1.1,
+   "position": [
+    3056,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://api.browser-use.com/api/v4/runs/{{ $('Agent: start (check)').first().json.id }}",
+    "options": {
+     "timeout": 30000
+    },
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Agent: status (check)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    3232,
+    368
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ ['completed','failed','cancelled'].includes($json.status) }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Agent done? (check)",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3408,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const r = $('Agent: brief (check)').first().json;\nconst out = $input.first().json.output || {};\nconst avail = $input.first().json.status === 'completed' && out.available;\nreturn [{ json: { ...r, available: !!avail, time: out.time && /^\\d\\d:\\d\\d$/.test(out.time) ? out.time : r.time,\n  table: out.table || 'Table for two', reason: out.reason || '' } }];\n"
+   },
+   "name": "Window table free?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3584,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.available }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Table free?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    3760,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "=😕 {{ $('The pick').first().json.name }} is full tonight. Romeo will try again tomorrow.",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "Fully booked",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    3760,
+    600
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 2 · The hunt 🔎\nHer saved spots → Google Places for the details → Claude picks the window-on-sunset table → a browser agent CHECKS the booking page. Nothing is booked yet.",
+    "width": 2292,
+    "height": 470,
+    "color": 4
+   },
+   "name": "note-24",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    1608,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Everything except the restaurant's name. That's staying a surprise.\nconst S = $('Romeo settings').first().json;\nconst r = $input.first().json;\nconst msg = `🌅 <b>Hey ${S.HER}, you've been asked on a date.</b>\n\n📅 ${r.day}\n🕰️ ${r.niceTime}, sunset's at ${r.sunset}\n📍 ${r.suburb}\n🍽️ ${r.cuisine}\n👗 ${r.dressCode}\n🤫 Where? That's staying a surprise.\n\nYou've got one choice:`;\nreturn [{ json: { ...r, invite: msg } }];\n"
+   },
+   "name": "Write the invite",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3936,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "sendAndWait",
+    "chatId": "={{ $('Romeo settings').first().json.HER_CHAT_ID }}",
+    "message": "={{ $json.invite }}",
+    "responseType": "approval",
+    "approvalOptions": {
+     "values": {
+      "approvalType": "double",
+      "approveLabel": "🍷 Wine with a view",
+      "disapproveLabel": "🍝 Leftovers on the couch"
+     }
+    },
+    "options": {
+     "appendAttribution": false,
+     "limitWaitTime": {
+      "values": {
+       "limitType": "afterTimeInterval",
+       "resumeAmount": 240,
+       "resumeUnit": "minutes"
+      }
+     }
+    }
+   },
+   "name": "Text her the invite",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    4112,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.data?.approved === true }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "She tapped yes?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    4288,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "=🍝 <b>She picked leftovers on the couch.</b> Nothing was booked. Netflix it is.",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "Leftovers it is",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    4288,
+    600
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 3 · The pitch 💌\nTo HER Telegram: everything except the restaurant's name. Only the yes button carries on.",
+    "width": 532,
+    "height": 470,
+    "color": 6
+   },
+   "name": "note-29",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    3896,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const S = $('Romeo settings').first().json;\nconst r = $('Write the invite').first().json;\nconst notes = 'Window table for two for the sunset please. It is a date: could dessert come out with a candle in it? Thank you!';\nconst task = `Go to ${r.website || ('the official website of ' + r.name)} and book a table for ${r.party} on ${r.date} at ${r.time}.\nName: ${S.ME}. Email: ${S.MY_EMAIL}. In the special requests / notes field write exactly: \"${notes}\"\nIf the page asks for a credit card or deposit, STOP and report needsHuman=true. Return the booking reference.`;\nconst schema = { type: 'object', properties: { booked: { type: 'boolean' }, ref: { type: 'string' }, needsHuman: { type: 'boolean' }, reason: { type: 'string' } } };\nreturn [{ json: { run: { task, outputSchema: schema, maxCostUsd: S.AGENT_MAX_USD } } }];\n"
+   },
+   "name": "Agent: brief (book)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "https://api.browser-use.com/api/v4/runs",
+    "options": {
+     "timeout": 30000
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.run) }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Agent: start (book)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    416,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "resume": "timeInterval",
+    "amount": 30,
+    "unit": "seconds"
+   },
+   "name": "Wait 30s (book)",
+   "type": "n8n-nodes-base.wait",
+   "typeVersion": 1.1,
+   "position": [
+    592,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://api.browser-use.com/api/v4/runs/{{ $('Agent: start (book)').first().json.id }}",
+    "options": {
+     "timeout": 30000
+    },
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Agent: status (book)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    768,
+    1100
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ ['completed','failed','cancelled'].includes($json.status) }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Agent done? (book)",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    944,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const r = $('Write the invite').first().json;\nconst out = $input.first().json.output || {};\nif (!out.booked) throw new Error('Romeo could not book ' + r.name + ': ' + (out.reason || 'unknown') + '. Book it by hand, she already said yes!');\n// Remember tonight for the drive-home lane (a separate execution).\nconst st = $getWorkflowStaticData('global');\nst.tonight = { date: r.date, name: r.name, time: r.time, fired: false };\nreturn [{ json: { ...r, booked: true, ref: out.ref || '' } }];\n"
+   },
+   "name": "Book the table",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "sendAndWait",
+    "chatId": "={{ $('Romeo settings').first().json.BABYSITTER_CHAT_ID }}",
+    "message": "={{ 'Hi ' + $('Romeo settings').first().json.BABYSITTER.name + '! Any chance you can babysit ' + $('Write the invite').first().json.day + ', from ' + $('Write the invite').first().json.niceTime + ' til about 10? $' + $('Romeo settings').first().json.BABYSITTER.ratePerHour + '/hr as usual 🙏' }}",
+    "responseType": "approval",
+    "approvalOptions": {
+     "values": {
+      "approvalType": "double",
+      "approveLabel": "✅ I'm in",
+      "disapproveLabel": "❌ Can't"
+     }
+    },
+    "options": {
+     "appendAttribution": false,
+     "limitWaitTime": {
+      "values": {
+       "limitType": "afterTimeInterval",
+       "resumeAmount": 120,
+       "resumeUnit": "minutes"
+      }
+     }
+    }
+   },
+   "name": "Babysitter: can you do tonight?",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1296,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://nominatim.openstreetmap.org/search?q=florist&format=jsonv2&extratags=1&limit=20&bounded=1&viewbox={{ $('Romeo settings').first().json.HER_WORK.lng - 0.04 }},{{ $('Romeo settings').first().json.HER_WORK.lat + 0.04 }},{{ $('Romeo settings').first().json.HER_WORK.lng + 0.04 }},{{ $('Romeo settings').first().json.HER_WORK.lat - 0.04 }}",
+    "options": {
+     "timeout": 8000
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "User-Agent",
+       "value": "romeo-date-night-n8n/1.0"
+      }
+     ]
+    }
+   },
+   "name": "Closest florist to her work",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1472,
+    1100
+   ],
+   "onError": "continueRegularOutput",
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000,
+   "alwaysOutputData": true
+  },
+  {
+   "parameters": {
+    "jsCode": "// The closest florist to her work, from OpenStreetMap (Nominatim: free, no key). A shop\n// that lists an email gets the order; otherwise your usual florist does.\nconst S = $('Romeo settings').first().json;\nconst w = S.HER_WORK;\nconst shops = $input.all().map(i => i.json).filter(s => s && s.lat);   // n8n splits the result list into items\nconst km = (a, b, c, d) => { const R = 6371, r = Math.PI / 180;\n  const x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2;\n  return 2 * R * Math.asin(Math.sqrt(x)); };\nconst ranked = shops.map(s => ({ name: (s.name || s.display_name.split(',')[0]).trim(),\n  email: (s.extratags || {}).email || (s.extratags || {})['contact:email'] || '',\n  km: km(w.lat, w.lng, +s.lat, +s.lon) })).sort((a, b) => a.km - b.km);\n// The order goes to the closest shop that lists an email, else your usual florist.\n// Filming: the closest shop full stop, with the email landing in your own inbox.\nconst withEmail = ranked.find(s => s.email);\nconst florist = S.FILMING ? (ranked[0] || S.FALLBACK_FLORIST) : (withEmail || { ...S.FALLBACK_FLORIST, km: null });\nconst shop = florist.km != null ? florist : null;\nconst r = $('Book the table').first().json;\nconst to = S.FILMING ? S.MY_EMAIL : florist.email;\nconst html = `<p>Hi ${florist.name},</p>\n<p>Could I please order a bunch of flowers (around $${S.FLOWERS.budget}) delivered <b>today by 3pm</b> to:</p>\n<p><b>${w.address}</b></p>\n<p>Card: <i>${S.FLOWERS.card}</i></p>\n<p>Happy to pay by card over the phone or by link. Thank you!</p>\n<p>${S.ME}</p>` + (S.FILMING ? `<hr><p style=\"color:#888\">Filming: this landed in your inbox. In the full build it goes to ${florist.name}${shop ? ` (${shop.km.toFixed(1)} km from her work)` : ''} if they list an email, otherwise your usual florist.</p>` : '');\nreturn [{ json: { to, subject: `Flower delivery today by 3pm - ${w.address}`, html, florist: florist.name,\n  floristKm: shop ? Math.round(shop.km * 10) / 10 : null, booking: r } }];\n"
+   },
+   "name": "Order the flowers",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1648,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "sendTo": "={{ $json.to }}",
+    "subject": "={{ $json.subject }}",
+    "emailType": "html",
+    "message": "={{ $json.html }}",
+    "options": {
+     "appendAttribution": false,
+     "senderName": "Romeo"
+    }
+   },
+   "name": "Email the florist",
+   "type": "n8n-nodes-base.gmail",
+   "typeVersion": 2.1,
+   "position": [
+    1824,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "calendar": {
+     "__rl": true,
+     "mode": "id",
+     "value": "={{ $('Romeo settings').first().json.MY_CALENDAR }}"
+    },
+    "start": "={{ $('Book the table').first().json.date + 'T' + $('Book the table').first().json.time + ':00' }}",
+    "end": "={{ $('Book the table').first().json.date + 'T22:30:00' }}",
+    "additionalFields": {
+     "summary": "🌅 Date night",
+     "attendees": [
+      "={{ $('Romeo settings').first().json.HER_EMAIL }}"
+     ],
+     "sendUpdates": "all",
+     "description": "Dress code: {{ $('Book the table').first().json.dressCode }}. Where? Surprise."
+    }
+   },
+   "name": "Block both calendars",
+   "type": "n8n-nodes-base.googleCalendar",
+   "typeVersion": 1.3,
+   "position": [
+    2000,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const S = $('Romeo settings').first().json;\nconst r = $('Book the table').first().json;\nconst f = $('Order the flowers').first().json;\nconst sitterIn = $('Babysitter: can you do tonight?').first().json.data;\nconst ok = !sitterIn || sitterIn.approved !== false;\nreturn [{ json: { msg: `🌹 <b>She said yes.</b> Romeo took it from there:\n\n🍽️ <b>${r.name}</b>, ${r.niceTime}, ${r.table || 'window table'}. Booked (ref ${r.ref}).\n👶 ${S.BABYSITTER.name}: ${ok ? 'confirmed' : \"can't make it, sort a backup\"}.\n💐 Flowers from ${f.florist}${f.floristKm != null ? ` (${f.floristKm} km away)` : ''}, at her work by 3pm.\n🕯️ Dessert comes out with a candle.\n📅 In both calendars.\n\n<i>Romeo's watching Find My for the drive home.</i>` } }];\n"
+   },
+   "name": "The cascade",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2176,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "={{ $json.msg }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "She said yes",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    2352,
+    1100
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 4 · The cascade 🌹\nOnly after yes: the agent books the table with the candle note in the special requests, the babysitter gets a yes/no, the closest florist to her work gets the order, and the night goes in both calendars.",
+    "width": 2292,
+    "height": 470,
+    "color": 3
+   },
+   "name": "note-43",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    200,
+    912
+   ]
+  },
+  {
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "romeo-location",
+    "responseMode": "onReceived",
+    "options": {}
+   },
+   "name": "Find My (iPhone Shortcut)",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    240,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// ============ ROMEO SETTINGS ============  edit these, nothing else. Setup: README.md\nreturn [{ json: {\n  FILMING: false,\n  ZERO_SPEND: false,\n  FORCE_GO: false,\n  ME: 'You',\n  HER: 'babe',                              // what Romeo calls her in the invite\n  TELEGRAM_CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID',          // you\n  HER_CHAT_ID: 'HER_TELEGRAM_CHAT_ID',                // she messages your bot once, then this is her chat id\n  BABYSITTER_CHAT_ID: 'BABYSITTER_TELEGRAM_CHAT_ID',  // same for your babysitter\n  MY_EMAIL: 'you@example.com',\n  HER_EMAIL: 'her@example.com',                       // she gets the calendar invite\n  MY_CALENDAR: 'primary',\n  HER_CALENDAR: 'her@example.com',                    // her Google calendar, shared with you (free/busy is enough)\n  TIMEZONE: 'Australia/Perth',\n  HOME: { lat: -31.9523, lng: 115.8613 },\n  HER_WORK: { lat: -31.9554, lng: 115.8585, address: 'Her work address' },\n  CITY: 'Perth WA',                                   // added to every restaurant search\n  RULES: { maxCloud: 25, maxWindKmh: 20, maxRain: 20, sunsetAfter: '19:00', freeAfter: '18:00' },\n  PARTY: 2,\n  BABYSITTER: { name: 'Sophie', ratePerHour: 25, wiseRecipientId: 0 },  // Wise recipient id for her bank account\n  FLOWERS: { budget: 90, card: 'Dress nice tonight. x' },\n  FALLBACK_FLORIST: { name: 'Your usual florist', email: 'orders@your-florist.com.au' },\n  HER_SONG: { title: 'Her favourite song', artist: '', uri: 'spotify:track:YOUR_TRACK_ID' },\n  HOME_ASSISTANT_URL: 'https://YOUR-HOME.ui.nabu.casa',\n  HEATER: 'climate.living_room',\n  WISE_PROFILE_ID: 0,\n  AGENT_MAX_USD: 2,                                   // hard spend cap per browser-agent run\n  MODEL: 'claude-sonnet-5-5',\n} }];\n"
+   },
+   "name": "Romeo settings (home)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    416,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Find My: Apple has no Find My API. An iPhone Shortcut (or OwnTracks in HTTP mode)\n// posts your phone's location here every few minutes once you leave the restaurant.\nconst S = $('Romeo settings (home)').first().json;\nconst st = $getWorkflowStaticData('global');\nconst b = $json.body || $json;\nconst t = st.tonight || {};\nconst today = new Date().toLocaleDateString('en-CA', { timeZone: S.TIMEZONE });\nreturn [{ json: { lat: Number(b.lat != null ? b.lat : b.latitude), lng: Number(b.lon != null ? b.lon : (b.lng != null ? b.lng : b.longitude)),\n  live: t.date === today && !t.fired } }];\n"
+   },
+   "name": "Where are we?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    592,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.live }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Date night tonight?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    768,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://router.project-osrm.org/route/v1/driving/{{ $json.lng }},{{ $json.lat }};{{ $('Romeo settings (home)').first().json.HOME.lng }},{{ $('Romeo settings (home)').first().json.HOME.lat }}?overview=false",
+    "options": {
+     "timeout": 30000
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "User-Agent",
+       "value": "romeo-date-night-n8n/1.0"
+      }
+     ]
+    }
+   },
+   "name": "Drive time home (OSRM)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    944,
+    1700
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "const d = ((($input.first().json.routes || [])[0]) || {}).duration || 9e9;\nreturn [{ json: { minutesOut: Math.max(1, Math.round(d / 60)), close: d <= 600 } }];\n"
+   },
+   "name": "Ten minutes out?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.close }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Inside ten minutes?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1296,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Hours from leaving for dinner (30 min before the booking) to now, at her rate.\nconst S = $('Romeo settings (home)').first().json;\nconst t = $getWorkflowStaticData('global').tonight;\nconst [h, m] = t.time.split(':').map(Number);\nconst now = new Date(new Date().toLocaleString('en-US', { timeZone: S.TIMEZONE }));\nconst hours = Math.max(2, Math.ceil(((now.getHours() * 60 + now.getMinutes()) - (h * 60 + m - 30)) / 60));\nreturn [{ json: { hours, amount: hours * S.BABYSITTER.ratePerHour } }];\n"
+   },
+   "name": "Babysitter's pay",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1472,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "=https://api.wise.com/v3/profiles/{{ $('Romeo settings (home)').first().json.WISE_PROFILE_ID }}/quotes",
+    "options": {
+     "timeout": 30000
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ sourceCurrency: 'AUD', targetCurrency: 'AUD', sourceAmount: $json.amount, targetAccount: $('Romeo settings (home)').first().json.BABYSITTER.wiseRecipientId }) }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Wise: quote",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1648,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "https://api.wise.com/v1/transfers",
+    "options": {
+     "timeout": 30000
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ targetAccount: $('Romeo settings (home)').first().json.BABYSITTER.wiseRecipientId, quoteUuid: $json.id, customerTransactionId: $execution.id + '-' + $now.toMillis(), details: { reference: 'Babysitting' } }) }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Wise: transfer",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1824,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "=https://api.wise.com/v3/profiles/{{ $('Romeo settings (home)').first().json.WISE_PROFILE_ID }}/transfers/{{ $json.id }}/payments",
+    "options": {
+     "timeout": 30000
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={\"type\":\"BALANCE\"}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Pay the babysitter",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2000,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "={{ $('Romeo settings (home)').first().json.HOME_ASSISTANT_URL }}/api/services/climate/turn_on",
+    "options": {
+     "timeout": 30000
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ entity_id: $('Romeo settings (home)').first().json.HEATER }) }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "name": "Heater on",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2176,
+    1700
+   ],
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "resource": "player",
+    "operation": "startMusic",
+    "id": "={{ $('Romeo settings (home)').first().json.HER_SONG.uri }}"
+   },
+   "name": "Her song",
+   "type": "n8n-nodes-base.spotify",
+   "typeVersion": 1,
+   "position": [
+    2352,
+    1700
+   ],
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "const st = $getWorkflowStaticData('global');\nif (st.tonight) st.tonight.fired = true;\nreturn [{ json: { done: true } }];\n"
+   },
+   "name": "Done for tonight",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2528,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings (home)').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "=🏠 <b>{{ $('Ten minutes out?').first().json.minutesOut }} minutes from home.</b>\n\n💸 {{ $('Romeo settings (home)').first().json.BABYSITTER.name }} paid ${{ $('Babysitter\\'s pay').first().json.amount }}\n🔥 Heater on\n🎶 Her song's playing\n\nWalk her through the door. 🌹",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "Walk through the door",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    2704,
+    1700
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 5 · The drive home 🏠\nIts own trigger. An iPhone Shortcut posts your location every few minutes after dinner (Apple has no Find My API). Inside ten minutes of home, once: Wise pays the babysitter, Home Assistant turns the heater on, Spotify plays her song.",
+    "width": 2644,
+    "height": 470,
+    "color": 7
+   },
+   "name": "note-59",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    200,
+    1512
+   ]
+  },
+  {
+   "parameters": {
+    "updates": [
+     "message"
+    ],
+    "additionalFields": {}
+   },
+   "name": "Her saves (Telegram)",
+   "type": "n8n-nodes-base.telegramTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    240,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// ============ ROMEO SETTINGS ============  edit these, nothing else. Setup: README.md\nreturn [{ json: {\n  FILMING: false,\n  ZERO_SPEND: false,\n  FORCE_GO: false,\n  ME: 'You',\n  HER: 'babe',                              // what Romeo calls her in the invite\n  TELEGRAM_CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID',          // you\n  HER_CHAT_ID: 'HER_TELEGRAM_CHAT_ID',                // she messages your bot once, then this is her chat id\n  BABYSITTER_CHAT_ID: 'BABYSITTER_TELEGRAM_CHAT_ID',  // same for your babysitter\n  MY_EMAIL: 'you@example.com',\n  HER_EMAIL: 'her@example.com',                       // she gets the calendar invite\n  MY_CALENDAR: 'primary',\n  HER_CALENDAR: 'her@example.com',                    // her Google calendar, shared with you (free/busy is enough)\n  TIMEZONE: 'Australia/Perth',\n  HOME: { lat: -31.9523, lng: 115.8613 },\n  HER_WORK: { lat: -31.9554, lng: 115.8585, address: 'Her work address' },\n  CITY: 'Perth WA',                                   // added to every restaurant search\n  RULES: { maxCloud: 25, maxWindKmh: 20, maxRain: 20, sunsetAfter: '19:00', freeAfter: '18:00' },\n  PARTY: 2,\n  BABYSITTER: { name: 'Sophie', ratePerHour: 25, wiseRecipientId: 0 },  // Wise recipient id for her bank account\n  FLOWERS: { budget: 90, card: 'Dress nice tonight. x' },\n  FALLBACK_FLORIST: { name: 'Your usual florist', email: 'orders@your-florist.com.au' },\n  HER_SONG: { title: 'Her favourite song', artist: '', uri: 'spotify:track:YOUR_TRACK_ID' },\n  HOME_ASSISTANT_URL: 'https://YOUR-HOME.ui.nabu.casa',\n  HEATER: 'climate.living_room',\n  WISE_PROFILE_ID: 0,\n  AGENT_MAX_USD: 2,                                   // hard spend cap per browser-agent run\n  MODEL: 'claude-sonnet-5-5',\n} }];\n"
+   },
+   "name": "Romeo settings (saves)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    416,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// She (or you) forwards an Instagram post to Romeo. Keep the link and the caption.\nconst m = $('Her saves (Telegram)').first().json.message || {};\nconst text = m.text || m.caption || '';\nconst link = (text.match(/https?:\\/\\/\\S*instagram\\.com\\/\\S+/i) || [])[0] || '';\nreturn [{ json: { link, text, chatId: m.chat && m.chat.id, isPost: !!link } }];\n"
+   },
+   "name": "Read the post",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    592,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.isPost }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Instagram link?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    768,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://r.jina.ai/{{ $json.link }}",
+    "options": {
+     "timeout": 30000
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "X-Return-Format",
+       "value": "text"
+      }
+     ]
+    }
+   },
+   "name": "Open the post",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    944,
+    2300
+   ],
+   "onError": "continueRegularOutput",
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "const S = $('Romeo settings (saves)').first().json;\nconst post = ($input.first().json.data || $input.first().json || '').toString().slice(0, 6000);\nconst prompt = `This is an Instagram post someone saved. If it is about a restaurant, cafe or bar, reply with JSON only:\n{\"restaurant\": true, \"name\": \"...\", \"suburb\": \"...\", \"cuisine\": \"...\"}\nOtherwise reply {\"restaurant\": false}.\n\nPOST:\n${$('Read the post').first().json.text}\n${post}`;\nreturn [{ json: { body: { model: S.MODEL, max_tokens: 150, messages: [{ role: 'user', content: prompt }] } } }];\n"
+   },
+   "name": "Brief: what is it?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages",
+    "options": {
+     "timeout": 90000
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "anthropic-version",
+       "value": "2023-06-01"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.body) }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "anthropicApi"
+   },
+   "name": "Claude files it",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1296,
+    2300
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "let j = {};\ntry { const t = $input.first().json.content[0].text; j = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); } catch (e) {}\nreturn [{ json: { ok: !!(j.restaurant && j.name), name: j.name || '', suburb: j.suburb || '', cuisine: j.cuisine || '',\n  ig: $('Read the post').first().json.link, saved_at: new Date().toISOString() } }];\n"
+   },
+   "name": "Restaurant?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1472,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Is a restaurant?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1648,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "resource": "row",
+    "operation": "insert",
+    "dataTableId": {
+     "__rl": true,
+     "mode": "name",
+     "value": "romeo_saves"
+    },
+    "columns": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "name": "={{ $json.name }}",
+      "suburb": "={{ $json.suburb }}",
+      "cuisine": "={{ $json.cuisine }}",
+      "ig": "={{ $json.ig }}",
+      "saved_at": "={{ $json.saved_at }}"
+     },
+     "schema": [
+      {
+       "id": "name",
+       "displayName": "name",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "type": "string",
+       "canBeUsedToMatch": true
+      },
+      {
+       "id": "suburb",
+       "displayName": "suburb",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "type": "string",
+       "canBeUsedToMatch": true
+      },
+      {
+       "id": "cuisine",
+       "displayName": "cuisine",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "type": "string",
+       "canBeUsedToMatch": true
+      },
+      {
+       "id": "ig",
+       "displayName": "ig",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "type": "string",
+       "canBeUsedToMatch": true
+      },
+      {
+       "id": "saved_at",
+       "displayName": "saved_at",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "type": "string",
+       "canBeUsedToMatch": true
+      }
+     ]
+    }
+   },
+   "name": "Save it",
+   "type": "n8n-nodes-base.dataTable",
+   "typeVersion": 1.1,
+   "position": [
+    1824,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Read the post').first().json.chatId }}",
+    "text": "=📌 Saved <b>{{ $('Restaurant?').first().json.name }}</b>. Romeo will keep it in mind for a sunset.",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false
+    }
+   },
+   "name": "Saved 📌",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    2000,
+    2300
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 6 · Her saves 📌\nInstagram has no API for saved posts. So she (or you) forwards a post to the bot: Romeo reads it, and if it's a restaurant, files it for the next perfect sunset.",
+    "width": 1940,
+    "height": 470,
+    "color": 2
+   },
+   "name": "note-71",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    200,
+    2112
+   ]
+  }
+ ],
+ "connections": {
+  "Every morning, 7am": {
+   "main": [
+    [
+     {
+      "node": "Romeo settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Romeo settings": {
+   "main": [
+    [
+     {
+      "node": "Weather forecast + sunset",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Weather forecast + sunset": {
+   "main": [
+    [
+     {
+      "node": "Read the sky",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read the sky": {
+   "main": [
+    [
+     {
+      "node": "My calendar: free after six?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "My calendar: free after six?": {
+   "main": [
+    [
+     {
+      "node": "Her calendar: free after six?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Her calendar: free after six?": {
+   "main": [
+    [
+     {
+      "node": "Both calendars",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Both calendars": {
+   "main": [
+    [
+     {
+      "node": "Perfect night?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Perfect night?": {
+   "main": [
+    [
+     {
+      "node": "Pull the trigger?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Pull the trigger?": {
+   "main": [
+    [
+     {
+      "node": "Her saved spots",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Her saved spots": {
+   "main": [
+    [
+     {
+      "node": "Google Places: each spot",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Google Places: each spot": {
+   "main": [
+    [
+     {
+      "node": "Spots with details",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Spots with details": {
+   "main": [
+    [
+     {
+      "node": "Brief for Romeo",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Brief for Romeo": {
+   "main": [
+    [
+     {
+      "node": "Claude picks the spot",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Claude picks the spot": {
+   "main": [
+    [
+     {
+      "node": "The pick",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "The pick": {
+   "main": [
+    [
+     {
+      "node": "Agent: brief (check)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Agent: brief (check)": {
+   "main": [
+    [
+     {
+      "node": "Agent: start (check)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Agent: start (check)": {
+   "main": [
+    [
+     {
+      "node": "Wait 30s (check)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Wait 30s (check)": {
+   "main": [
+    [
+     {
+      "node": "Agent: status (check)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Agent: status (check)": {
+   "main": [
+    [
+     {
+      "node": "Agent done? (check)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Agent done? (check)": {
+   "main": [
+    [
+     {
+      "node": "Window table free?",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Wait 30s (check)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Window table free?": {
+   "main": [
+    [
+     {
+      "node": "Table free?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Table free?": {
+   "main": [
+    [
+     {
+      "node": "Write the invite",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Fully booked",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Write the invite": {
+   "main": [
+    [
+     {
+      "node": "Text her the invite",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Text her the invite": {
+   "main": [
+    [
+     {
+      "node": "She tapped yes?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "She tapped yes?": {
+   "main": [
+    [
+     {
+      "node": "Agent: brief (book)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Leftovers it is",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Agent: brief (book)": {
+   "main": [
+    [
+     {
+      "node": "Agent: start (book)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Agent: start (book)": {
+   "main": [
+    [
+     {
+      "node": "Wait 30s (book)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Wait 30s (book)": {
+   "main": [
+    [
+     {
+      "node": "Agent: status (book)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Agent: status (book)": {
+   "main": [
+    [
+     {
+      "node": "Agent done? (book)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Agent done? (book)": {
+   "main": [
+    [
+     {
+      "node": "Book the table",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Wait 30s (book)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Book the table": {
+   "main": [
+    [
+     {
+      "node": "Babysitter: can you do tonight?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Babysitter: can you do tonight?": {
+   "main": [
+    [
+     {
+      "node": "Closest florist to her work",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Closest florist to her work": {
+   "main": [
+    [
+     {
+      "node": "Order the flowers",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Order the flowers": {
+   "main": [
+    [
+     {
+      "node": "Email the florist",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Email the florist": {
+   "main": [
+    [
+     {
+      "node": "Block both calendars",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Block both calendars": {
+   "main": [
+    [
+     {
+      "node": "The cascade",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "The cascade": {
+   "main": [
+    [
+     {
+      "node": "She said yes",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Find My (iPhone Shortcut)": {
+   "main": [
+    [
+     {
+      "node": "Romeo settings (home)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Romeo settings (home)": {
+   "main": [
+    [
+     {
+      "node": "Where are we?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Where are we?": {
+   "main": [
+    [
+     {
+      "node": "Date night tonight?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Date night tonight?": {
+   "main": [
+    [
+     {
+      "node": "Drive time home (OSRM)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Drive time home (OSRM)": {
+   "main": [
+    [
+     {
+      "node": "Ten minutes out?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ten minutes out?": {
+   "main": [
+    [
+     {
+      "node": "Inside ten minutes?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Inside ten minutes?": {
+   "main": [
+    [
+     {
+      "node": "Babysitter's pay",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Babysitter's pay": {
+   "main": [
+    [
+     {
+      "node": "Wise: quote",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Wise: quote": {
+   "main": [
+    [
+     {
+      "node": "Wise: transfer",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Wise: transfer": {
+   "main": [
+    [
+     {
+      "node": "Pay the babysitter",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Pay the babysitter": {
+   "main": [
+    [
+     {
+      "node": "Heater on",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Heater on": {
+   "main": [
+    [
+     {
+      "node": "Her song",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Her song": {
+   "main": [
+    [
+     {
+      "node": "Done for tonight",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Done for tonight": {
+   "main": [
+    [
+     {
+      "node": "Walk through the door",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Her saves (Telegram)": {
+   "main": [
+    [
+     {
+      "node": "Romeo settings (saves)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Romeo settings (saves)": {
+   "main": [
+    [
+     {
+      "node": "Read the post",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read the post": {
+   "main": [
+    [
+     {
+      "node": "Instagram link?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Instagram link?": {
+   "main": [
+    [
+     {
+      "node": "Open the post",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Open the post": {
+   "main": [
+    [
+     {
+      "node": "Brief: what is it?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Brief: what is it?": {
+   "main": [
+    [
+     {
+      "node": "Claude files it",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Claude files it": {
+   "main": [
+    [
+     {
+      "node": "Restaurant?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Restaurant?": {
+   "main": [
+    [
+     {
+      "node": "Is a restaurant?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Is a restaurant?": {
+   "main": [
+    [
+     {
+      "node": "Save it",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Save it": {
+   "main": [
+    [
+     {
+      "node": "Saved 📌",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

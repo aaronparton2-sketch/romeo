@@ -1,0 +1,1146 @@
+{
+ "name": "🎬 ROMEO - date night (demo: one click, everything to your phone)",
+ "nodes": [
+  {
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "days",
+       "triggerAtHour": 7
+      }
+     ]
+    }
+   },
+   "name": "Every morning, 7am",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    40,
+    288
+   ]
+  },
+  {
+   "parameters": {},
+   "name": "Run (manual)",
+   "type": "n8n-nodes-base.manualTrigger",
+   "typeVersion": 1,
+   "position": [
+    40,
+    448
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// ============ ROMEO SETTINGS (DEMO) ============  edit these, nothing else\n// Every message this demo sends comes to YOU: you play her, the babysitter and the\n// restaurant, and the florist's order lands in your inbox.\nreturn [{ json: {\n  FILMING: true,\n  ZERO_SPEND: false,                       // true = no Claude call (Romeo takes the first saved spot with a view)\n  FORCE_GO: true,                          // demo: if tonight's sky isn't perfect, pretend it is\n  ME: 'You',\n  HER: 'babe',\n  TELEGRAM_CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID',  // you\n  HER_CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID',       // demo: you play her\n  BABYSITTER_CHAT_ID: 'YOUR_TELEGRAM_CHAT_ID', // demo: you play the babysitter\n  MY_EMAIL: 'you@example.com',             // the florist's order lands here in the demo\n  TIMEZONE: 'Australia/Perth',\n  HOME: { lat: -31.9523, lng: 115.8613 },\n  HER_WORK: { lat: -31.9554, lng: 115.8585, address: 'St Georges Terrace, Perth WA 6000' },\n  RULES: { maxCloud: 25, maxWindKmh: 20, maxRain: 20, sunsetAfter: '19:00', freeAfter: '18:00' },\n  PARTY: 2,\n  BABYSITTER: { name: 'Sophie', ratePerHour: 25 },\n  FLOWERS: { budget: 90, card: 'Dress nice tonight. Romeo x' },\n  FALLBACK_FLORIST: { name: 'Your usual florist', email: 'you@example.com' },\n  HER_SONG: { title: 'you look like you love me', artist: 'Ella Langley', uri: 'spotify:track:YOUR_TRACK' },\n  HEATER: 'climate.living_room',\n  MODEL: 'claude-sonnet-5-5',\n} }];\n"
+   },
+   "name": "Romeo settings",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    240,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://api.open-meteo.com/v1/forecast?latitude={{ $('Romeo settings').first().json.HOME.lat }}&longitude={{ $('Romeo settings').first().json.HOME.lng }}&hourly=cloud_cover,wind_speed_10m,precipitation_probability&daily=sunset&timezone={{ encodeURIComponent($('Romeo settings').first().json.TIMEZONE) }}&forecast_days=1",
+    "options": {
+     "timeout": 30000
+    }
+   },
+   "name": "Weather forecast + sunset",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    416,
+    368
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "// Open-Meteo: free, no key. The sunset time plus cloud, wind and rain in the sunset hour.\nconst S = $('Romeo settings').first().json;\nconst f = $input.first().json;\nconst sunsetAt = f.daily.sunset[0];                      // local time, e.g. 2026-11-06T19:05\nconst i = Math.max(0, f.hourly.time.indexOf(sunsetAt.slice(0, 13) + ':00'));\nconst cloud = f.hourly.cloud_cover[i];\nconst wind = Math.round(f.hourly.wind_speed_10m[i]);\nconst rain = f.hourly.precipitation_probability[i];\nconst sunset = sunsetAt.slice(11, 16);\nconst checks = {\n  'clear skies': cloud <= S.RULES.maxCloud,\n  'no wind': wind <= S.RULES.maxWindKmh,\n  'no rain': rain <= S.RULES.maxRain,\n  'sunset after seven': sunset >= S.RULES.sunsetAfter,\n};\nconst perfect = Object.values(checks).every(Boolean);\nconst day = new Date(sunsetAt + ':00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });\nreturn [{ json: { date: sunsetAt.slice(0, 10), day, sunset, cloud, wind, rain, checks, perfect,\n  forced: !perfect && !!S.FORCE_GO } }];\n"
+   },
+   "name": "Read the sky",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    592,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: both calendars, same shape as two Google Calendar \"availability\" checks.\n// The full build asks Google for real.\nreturn [{ json: { me: { available: true }, her: { available: true } } }];\n"
+   },
+   "name": "Both calendars",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    768,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const S = $('Romeo settings').first().json;\nconst sky = $('Read the sky').first().json;\nconst cal = $input.first().json;\nconst bothFree = !!(cal.me && cal.me.available && cal.her && cal.her.available);\nconst go = (sky.perfect || sky.forced) && bothFree;\nconst tick = (ok) => (ok ? '✅' : '❌');\nconst lines = Object.entries(sky.checks).map(([k, v]) => `${tick(v)} ${k}`);\nlines.push(`${tick(bothFree)} both free after six`);\nreturn [{ json: { go, bothFree, report: `🌅 <b>Sunset ${sky.sunset}</b>, ${sky.cloud}% cloud, ${sky.wind} km/h wind\\n` + lines.join('\\n') +\n  (sky.forced ? '\\n<i>(filming: sky forced perfect)</i>' : '') } }];\n"
+   },
+   "name": "Perfect night?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    944,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.go }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Pull the trigger?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1120,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "={{ $('Perfect night?').first().json.report }}\n\n🌹 <b>Romeo's on it.</b>",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "It's on",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1296,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "={{ $('Perfect night?').first().json.report }}\n\n😴 Not tonight. Romeo checks again tomorrow.",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "Not tonight",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1120,
+    600
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 1 · The trigger 🌅\nEvery morning: the forecast, both calendars and the exact time of sunset. Clear skies, no wind, both free after six and a sunset after seven? The whole thing gets triggered.",
+    "width": 1236,
+    "height": 470,
+    "color": 5
+   },
+   "name": "note-10",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    200,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: the restaurants she's saved or sent you on Instagram. Instagram has no API for\n// saved posts, so in the full build she (or you) forwards them to Romeo on Telegram and\n// he files them. Same shape as a Google Places lookup of each one.\nreturn [\n  { name: 'Odyssea',            suburb: 'City Beach',  cuisine: 'Seafood',        lat: -31.9389, lng: 115.7546, ig: 'https://www.instagram.com/p/odyssea/',     about: 'Beachfront dining room, floor-to-ceiling windows straight onto the Indian Ocean.' },\n  { name: 'Si Paradiso',        suburb: 'Highgate',    cuisine: 'Italian',        lat: -31.9395, lng: 115.8706, ig: 'https://www.instagram.com/p/siparadiso/',  about: 'Moody courtyard bar and pasta. No view.' },\n  { name: 'The Shorehouse',     suburb: 'Swanbourne',  cuisine: 'Modern Aussie',  lat: -31.9706, lng: 115.7556, ig: 'https://www.instagram.com/p/shorehouse/',  about: 'On the dunes at Swanbourne beach, west-facing deck and window tables.' },\n  { name: 'Lulu La Delizia',    suburb: 'Subiaco',     cuisine: 'Pasta',          lat: -31.9469, lng: 115.8264, ig: 'https://www.instagram.com/p/lululadelizia/', about: 'Tiny handmade pasta spot. Street-facing, no view.' },\n  { name: 'Bib & Tucker',       suburb: 'Leighton',    cuisine: 'Mediterranean',  lat: -32.0262, lng: 115.7509, ig: 'https://www.instagram.com/p/bibandtucker/', about: 'Leighton Beach, looks west over the water.' },\n  { name: 'Long Chim',          suburb: 'Perth CBD',   cuisine: 'Thai',           lat: -31.9558, lng: 115.8596, ig: 'https://www.instagram.com/p/longchim/',    about: 'Basement in the State Buildings. Loud, fun, no windows.' },\n].map(j => ({ json: j }));\n"
+   },
+   "name": "Her saved restaurants",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1472,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Hand Romeo every saved spot and tonight's sunset, and ask for ONE pick back as JSON.\nconst S = $('Romeo settings').first().json;\nconst sky = $('Read the sky').first().json;\nconst saves = $input.all().map((i, n) => ({ n, ...i.json }));\nconst prompt = `You plan date night. Tonight's sunset is at ${sky.sunset} in ${S.TIMEZONE}.\nBelow are restaurants she has saved. Pick the ONE most likely to have a table for two by a window looking straight at the sunset (west-facing, on the water beats everything).\nNever pick a place with no view.\nReply with JSON only: {\"n\": <number>, \"why\": \"<one short sentence>\", \"dressCode\": \"<2-5 words>\", \"vibe\": \"<3-6 words>\"}\n\n${saves.map(s => `${s.n}. ${s.name} (${s.suburb}) - ${s.cuisine}. ${s.about || ''}`).join('\\n')}`;\nreturn [{ json: { saves, body: { model: S.MODEL, max_tokens: 300, messages: [{ role: 'user', content: prompt }] } } }];\n"
+   },
+   "name": "Brief for Romeo",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1648,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ !$('Romeo settings').first().json.ZERO_SPEND }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "Ask Claude?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1824,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages",
+    "options": {
+     "timeout": 90000
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "anthropic-version",
+       "value": "2023-06-01"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.body) }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "anthropicApi"
+   },
+   "name": "Claude picks the spot",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2000,
+    368
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "// Claude's pick, checked. If Claude is off (ZERO_SPEND) or answers badly, take the first\n// spot that mentions water, so the run never stalls.\nconst S = $('Romeo settings').first().json;\nconst sky = $('Read the sky').first().json;\nconst saves = $('Brief for Romeo').first().json.saves;\nlet pick = {};\ntry {\n  const txt = ($input.first().json.content || [])[0].text;\n  pick = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));\n} catch (e) { pick = {}; }\nlet r = saves[pick.n];\nif (!r) {\n  r = saves.find(s => /water|ocean|beach|west/i.test(s.about || '')) || saves[0];\n  pick = { why: 'Right on the water, facing west.', dressCode: 'Smart casual', vibe: 'Sunset by the water' };\n}\n// book 30 minutes before sunset, on a quarter hour\nconst [h, m] = sky.sunset.split(':').map(Number);\nlet mins = h * 60 + m - 30; mins -= mins % 15;\nconst time = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;\nconst nice = new Date(`${sky.date}T${time}:00`).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });\nreturn [{ json: { ...r, why: pick.why, dressCode: pick.dressCode || 'Smart casual', vibe: pick.vibe || '',\n  date: sky.date, day: sky.day, time, niceTime: nice, sunset: sky.sunset, party: S.PARTY } }];\n"
+   },
+   "name": "The pick",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2176,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: the browser agent checking the restaurant's booking page for a window table.\n// Same shape the full build's agent returns. Nothing is booked until she says yes.\nconst r = $input.first().json;\nreturn [{ json: { ...r, available: true, table: 'Window, table for two', heldUntil: '2 hours' } }];\n"
+   },
+   "name": "Hold a window table",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2352,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 2 · The hunt 🔎\nEvery restaurant she's saved or sent you on Instagram. Claude finds the one with a table for two by the window, right on sunset, and the agent holds it.",
+    "width": 1060,
+    "height": 470,
+    "color": 4
+   },
+   "name": "note-17",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    1432,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// Everything except the restaurant's name. That's staying a surprise.\nconst S = $('Romeo settings').first().json;\nconst r = $input.first().json;\nconst msg = `🌅 <b>Hey ${S.HER}, you've been asked on a date.</b>\n\n📅 ${r.day}\n🕰️ ${r.niceTime}, sunset's at ${r.sunset}\n📍 ${r.suburb}\n🍽️ ${r.cuisine}\n👗 ${r.dressCode}\n🤫 Where? That's staying a surprise.\n\nYou've got one choice:`;\nreturn [{ json: { ...r, invite: msg } }];\n"
+   },
+   "name": "Write the invite",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2528,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "sendAndWait",
+    "chatId": "={{ $('Romeo settings').first().json.HER_CHAT_ID }}",
+    "message": "={{ $json.invite }}",
+    "responseType": "approval",
+    "approvalOptions": {
+     "values": {
+      "approvalType": "double",
+      "approveLabel": "🍷 Wine with a view",
+      "disapproveLabel": "🍝 Leftovers on the couch"
+     }
+    },
+    "options": {
+     "appendAttribution": false,
+     "limitWaitTime": {
+      "values": {
+       "limitType": "afterTimeInterval",
+       "resumeAmount": 30,
+       "resumeUnit": "minutes"
+      }
+     }
+    }
+   },
+   "name": "Text her the invite",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    2704,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.data?.approved === true }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   },
+   "name": "She tapped yes?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    2880,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "=🍝 <b>She picked leftovers on the couch.</b> Romeo let the table go. Netflix it is.",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "Leftovers it is",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    2880,
+    600
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 3 · The pitch 💌\nDate, time, location, cuisine, dress code. Everything except the restaurant's name. One choice: wine with a view, or leftovers on the couch.",
+    "width": 532,
+    "height": 470,
+    "color": 6
+   },
+   "name": "note-22",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    2488,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: the browser agent booking the table it held. Same shape as the real run.\nconst r = $('Write the invite').first().json;\nreturn [{ json: { ...r, booked: true, ref: 'RM-' + String(Date.now()).slice(-5),\n  notes: 'Window table for two for the sunset please. It is a date: could dessert come out with a candle in it? Thank you!' } }];\n"
+   },
+   "name": "Book the table",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3056,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "=📲 <b>Romeo → restaurant (booking notes)</b>\n={{ $json.notes }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "Note to the restaurant",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    3232,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "operation": "sendAndWait",
+    "chatId": "={{ $('Romeo settings').first().json.BABYSITTER_CHAT_ID }}",
+    "message": "={{ 'Hi ' + $('Romeo settings').first().json.BABYSITTER.name + '! Any chance you can babysit ' + $('Write the invite').first().json.day + ', from ' + $('Write the invite').first().json.niceTime + ' til about 10? $' + $('Romeo settings').first().json.BABYSITTER.ratePerHour + '/hr as usual 🙏' }}",
+    "responseType": "approval",
+    "approvalOptions": {
+     "values": {
+      "approvalType": "double",
+      "approveLabel": "✅ I'm in",
+      "disapproveLabel": "❌ Can't"
+     }
+    },
+    "options": {
+     "appendAttribution": false,
+     "limitWaitTime": {
+      "values": {
+       "limitType": "afterTimeInterval",
+       "resumeAmount": 30,
+       "resumeUnit": "minutes"
+      }
+     }
+    }
+   },
+   "name": "Babysitter: can you do tonight?",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    3408,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://nominatim.openstreetmap.org/search?q=florist&format=jsonv2&extratags=1&limit=20&bounded=1&viewbox={{ $('Romeo settings').first().json.HER_WORK.lng - 0.04 }},{{ $('Romeo settings').first().json.HER_WORK.lat + 0.04 }},{{ $('Romeo settings').first().json.HER_WORK.lng + 0.04 }},{{ $('Romeo settings').first().json.HER_WORK.lat - 0.04 }}",
+    "options": {
+     "timeout": 8000
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "User-Agent",
+       "value": "romeo-date-night-n8n/1.0"
+      }
+     ]
+    }
+   },
+   "name": "Closest florist to her work",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    3584,
+    368
+   ],
+   "onError": "continueRegularOutput",
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000,
+   "alwaysOutputData": true
+  },
+  {
+   "parameters": {
+    "jsCode": "// The closest florist to her work, from OpenStreetMap (Nominatim: free, no key). A shop\n// that lists an email gets the order; otherwise your usual florist does.\nconst S = $('Romeo settings').first().json;\nconst w = S.HER_WORK;\nconst shops = $input.all().map(i => i.json).filter(s => s && s.lat);   // n8n splits the result list into items\nconst km = (a, b, c, d) => { const R = 6371, r = Math.PI / 180;\n  const x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2;\n  return 2 * R * Math.asin(Math.sqrt(x)); };\nconst ranked = shops.map(s => ({ name: (s.name || s.display_name.split(',')[0]).trim(),\n  email: (s.extratags || {}).email || (s.extratags || {})['contact:email'] || '',\n  km: km(w.lat, w.lng, +s.lat, +s.lon) })).sort((a, b) => a.km - b.km);\n// The order goes to the closest shop that lists an email, else your usual florist.\n// Filming: the closest shop full stop, with the email landing in your own inbox.\nconst withEmail = ranked.find(s => s.email);\nconst florist = S.FILMING ? (ranked[0] || S.FALLBACK_FLORIST) : (withEmail || { ...S.FALLBACK_FLORIST, km: null });\nconst shop = florist.km != null ? florist : null;\nconst r = $('Book the table').first().json;\nconst to = S.FILMING ? S.MY_EMAIL : florist.email;\nconst html = `<p>Hi ${florist.name},</p>\n<p>Could I please order a bunch of flowers (around $${S.FLOWERS.budget}) delivered <b>today by 3pm</b> to:</p>\n<p><b>${w.address}</b></p>\n<p>Card: <i>${S.FLOWERS.card}</i></p>\n<p>Happy to pay by card over the phone or by link. Thank you!</p>\n<p>${S.ME}</p>` + (S.FILMING ? `<hr><p style=\"color:#888\">Filming: this landed in your inbox. In the full build it goes to ${florist.name}${shop ? ` (${shop.km.toFixed(1)} km from her work)` : ''} if they list an email, otherwise your usual florist.</p>` : '');\nreturn [{ json: { to, subject: `Flower delivery today by 3pm - ${w.address}`, html, florist: florist.name,\n  floristKm: shop ? Math.round(shop.km * 10) / 10 : null, booking: r } }];\n"
+   },
+   "name": "Order the flowers",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3760,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "sendTo": "={{ $json.to }}",
+    "subject": "={{ $json.subject }}",
+    "emailType": "html",
+    "message": "={{ $json.html }}",
+    "options": {
+     "appendAttribution": false,
+     "senderName": "Romeo"
+    }
+   },
+   "name": "Email the florist",
+   "type": "n8n-nodes-base.gmail",
+   "typeVersion": 2.1,
+   "position": [
+    3936,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: the date blocked in both calendars. Same shape as a Google Calendar event.\nconst r = $('Book the table').first().json;\nreturn [{ json: { id: 'romeo-' + r.date, summary: '🌅 Date night', start: { dateTime: `${r.date}T${r.time}:00` } } }];\n"
+   },
+   "name": "Block both calendars",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    4112,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "={{ $json.msg }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "She said yes",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    4288,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const S = $('Romeo settings').first().json;\nconst r = $('Book the table').first().json;\nconst f = $('Order the flowers').first().json;\nconst sitterIn = $('Babysitter: can you do tonight?').first().json.data;\nconst ok = !sitterIn || sitterIn.approved !== false;\nreturn [{ json: { msg: `🌹 <b>She said yes.</b> Romeo took it from there:\n\n🍽️ <b>${r.name}</b>, ${r.niceTime}, ${r.table || 'window table'}. Booked (ref ${r.ref}).\n👶 ${S.BABYSITTER.name}: ${ok ? 'confirmed' : \"can't make it, sort a backup\"}.\n💐 Flowers from ${f.florist}${f.floristKm != null ? ` (${f.floristKm} km away)` : ''}, at her work by 3pm.\n🕯️ Dessert comes out with a candle.\n📅 In both calendars.\n\n<i>Romeo's watching Find My for the drive home.</i>` } }];\n"
+   },
+   "name": "The cascade",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    4112,
+    600
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 4 · The cascade 🌹\nThe second she taps yes: the table by the window booked, the babysitter confirmed, flowers to her work by three, and a note so dessert comes out with a candle.",
+    "width": 1412,
+    "height": 470,
+    "color": 3
+   },
+   "name": "note-32",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    3016,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: Find My pings on the drive home, restaurant to front door. In the full build an\n// iPhone Shortcut (or OwnTracks) posts your real location to Romeo's webhook.\nconst S = $('Romeo settings').first().json;\nconst r = $('Book the table').first().json;\nreturn [0, 0.45, 0.7, 0.85].map((t, i) => ({ json: { ping: i + 1,\n  lat: r.lat + (S.HOME.lat - r.lat) * t, lng: r.lng + (S.HOME.lng - r.lng) * t } }));\n"
+   },
+   "name": "Find My: the drive home",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    4464,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=https://router.project-osrm.org/route/v1/driving/{{ $json.lng }},{{ $json.lat }};{{ $('Romeo settings').first().json.HOME.lng }},{{ $('Romeo settings').first().json.HOME.lat }}?overview=false",
+    "options": {
+     "timeout": 30000,
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 400
+      }
+     }
+    },
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "User-Agent",
+       "value": "romeo-date-night-n8n/1.0"
+      }
+     ]
+    }
+   },
+   "name": "Drive time home (OSRM)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    4640,
+    368
+   ],
+   "retryOnFail": true,
+   "maxTries": 3,
+   "waitBetweenTries": 2000
+  },
+  {
+   "parameters": {
+    "jsCode": "// OSRM drive time from each ping to home. The first one under ten minutes fires the finale.\nconst pings = $('Find My: the drive home').all().map(i => i.json);\nconst times = $input.all().map(i => Math.round(((i.json.routes || [])[0] || {}).duration || 9e9));\nconst hit = times.findIndex(t => t <= 600);\nconst i = hit < 0 ? times.length - 1 : hit;\nreturn [{ json: { ...pings[i], minutesOut: Math.max(1, Math.round(times[i] / 60)), log: times.map((t, n) => `ping ${n + 1}: ${Math.round(t / 60)} min`).join(', ') } }];\n"
+   },
+   "name": "Ten minutes out?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    4816,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: paying the babysitter. Same shape as a funded Wise transfer.\nconst S = $('Romeo settings').first().json;\nconst r = $('Book the table').first().json;\nconst [h, m] = r.time.split(':').map(Number);\nconst hours = Math.max(3, Math.ceil((22 * 60 - (h * 60 + m - 30)) / 60));   // left 30 min before, home about 10pm\nreturn [{ json: { status: 'outgoing_payment_sent', amount: hours * S.BABYSITTER.ratePerHour, hours } }];\n"
+   },
+   "name": "Pay the babysitter",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    4992,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: Home Assistant turning the heater on. Same shape as its service call.\nconst S = $('Romeo settings').first().json;\nreturn [{ json: { entity_id: S.HEATER, state: 'heat', attributes: { temperature: 22 } } }];\n"
+   },
+   "name": "Heater on",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    5168,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// FILMING: Spotify starting her song on the living-room speaker.\nconst S = $('Romeo settings').first().json;\nreturn [{ json: { playing: true, track: `${S.HER_SONG.artist} - ${S.HER_SONG.title}` } }];\n"
+   },
+   "name": "Her song",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    5344,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const S = $('Romeo settings').first().json;\nconst t = $('Ten minutes out?').first().json;\nconst p = $('Pay the babysitter').first().json;\nreturn [{ json: { msg: `🏠 <b>${t.minutesOut} minutes from home.</b>\n\n💸 ${S.BABYSITTER.name} paid $${p.amount}\n🔥 Heater on, 22°\n🎶 Playing: ${S.HER_SONG.artist ? S.HER_SONG.artist + ' - ' : ''}${S.HER_SONG.title}\n\nWalk her through the door. 🌹` } }];\n"
+   },
+   "name": "Home's ready",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    5520,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $('Romeo settings').first().json.TELEGRAM_CHAT_ID }}",
+    "text": "={{ $json.msg }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "name": "Walk through the door",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    5696,
+    368
+   ]
+  },
+  {
+   "parameters": {
+    "content": "## 5 · The finale 🏠\nRomeo tracks us on Find My. Ten minutes from home: the babysitter gets paid, the heater kicks on, and her favourite song starts playing as we walk through the door.",
+    "width": 1412,
+    "height": 470,
+    "color": 7
+   },
+   "name": "note-41",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    4424,
+    180
+   ]
+  }
+ ],
+ "connections": {
+  "Every morning, 7am": {
+   "main": [
+    [
+     {
+      "node": "Romeo settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run (manual)": {
+   "main": [
+    [
+     {
+      "node": "Romeo settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Romeo settings": {
+   "main": [
+    [
+     {
+      "node": "Weather forecast + sunset",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Weather forecast + sunset": {
+   "main": [
+    [
+     {
+      "node": "Read the sky",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Read the sky": {
+   "main": [
+    [
+     {
+      "node": "Both calendars",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Both calendars": {
+   "main": [
+    [
+     {
+      "node": "Perfect night?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Perfect night?": {
+   "main": [
+    [
+     {
+      "node": "Pull the trigger?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Pull the trigger?": {
+   "main": [
+    [
+     {
+      "node": "It's on",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Not tonight",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "It's on": {
+   "main": [
+    [
+     {
+      "node": "Her saved restaurants",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Her saved restaurants": {
+   "main": [
+    [
+     {
+      "node": "Brief for Romeo",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Brief for Romeo": {
+   "main": [
+    [
+     {
+      "node": "Ask Claude?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ask Claude?": {
+   "main": [
+    [
+     {
+      "node": "Claude picks the spot",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "The pick",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Claude picks the spot": {
+   "main": [
+    [
+     {
+      "node": "The pick",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "The pick": {
+   "main": [
+    [
+     {
+      "node": "Hold a window table",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Hold a window table": {
+   "main": [
+    [
+     {
+      "node": "Write the invite",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Write the invite": {
+   "main": [
+    [
+     {
+      "node": "Text her the invite",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Text her the invite": {
+   "main": [
+    [
+     {
+      "node": "She tapped yes?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "She tapped yes?": {
+   "main": [
+    [
+     {
+      "node": "Book the table",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Leftovers it is",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Book the table": {
+   "main": [
+    [
+     {
+      "node": "Note to the restaurant",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Note to the restaurant": {
+   "main": [
+    [
+     {
+      "node": "Babysitter: can you do tonight?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Babysitter: can you do tonight?": {
+   "main": [
+    [
+     {
+      "node": "Closest florist to her work",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Closest florist to her work": {
+   "main": [
+    [
+     {
+      "node": "Order the flowers",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Order the flowers": {
+   "main": [
+    [
+     {
+      "node": "Email the florist",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Email the florist": {
+   "main": [
+    [
+     {
+      "node": "Block both calendars",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Block both calendars": {
+   "main": [
+    [
+     {
+      "node": "The cascade",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "The cascade": {
+   "main": [
+    [
+     {
+      "node": "She said yes",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "She said yes": {
+   "main": [
+    [
+     {
+      "node": "Find My: the drive home",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Find My: the drive home": {
+   "main": [
+    [
+     {
+      "node": "Drive time home (OSRM)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Drive time home (OSRM)": {
+   "main": [
+    [
+     {
+      "node": "Ten minutes out?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ten minutes out?": {
+   "main": [
+    [
+     {
+      "node": "Pay the babysitter",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Pay the babysitter": {
+   "main": [
+    [
+     {
+      "node": "Heater on",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Heater on": {
+   "main": [
+    [
+     {
+      "node": "Her song",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Her song": {
+   "main": [
+    [
+     {
+      "node": "Home's ready",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Home's ready": {
+   "main": [
+    [
+     {
+      "node": "Walk through the door",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}
